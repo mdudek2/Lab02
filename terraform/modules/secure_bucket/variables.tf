@@ -9,15 +9,9 @@ variable "log_bucket" {
   description = "Bucket that receives S3 server access logs. null means no access logging."
 }
 
-variable "enable_logging" {
-  description = "Whether to enable S3 server access logging"
-  type        = bool
-  default     = false
-}
-
 variable "log_prefix" {
   type    = string
-  default = "s3-access/"
+  default = ""
 }
 
 variable "noncurrent_days" {

@@ -51,7 +51,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
 }
 
 resource "aws_s3_bucket_logging" "this" {
-  count         = var.enable_logging ? 1 : 0
+  count         = var.log_bucket == null ? 0 : 1
   bucket        = aws_s3_bucket.this.id
   target_bucket = var.log_bucket
   target_prefix = var.log_prefix
@@ -76,11 +76,7 @@ locals {
       Condition = { NumericLessThan = { "s3:TlsVersion" = "1.2" } }
     },
   ]
-
-  extra_statements = try(
-    jsondecode(var.extra_policy_json).Statement,
-    []
-  )
+  extra_statements = var.extra_policy_json == "" ? [] : jsondecode(var.extra_policy_json).Statement
 }
 
 resource "aws_s3_bucket_policy" "this" {
