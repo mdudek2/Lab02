@@ -94,6 +94,69 @@ These checks are important from a security standpoint because they protect again
 
 ### Q8 (explore). The limits of a bearer token. A JWT stays valid until it expires, even if the admin has left. Explain the revocation problem and how the 30 minute lifetime reduces it. Compare the USER_PASSWORD_AUTH flow used here with the OAuth 2.0 authorization code flow with PKCE and the Cognito hosted UI, and say which you would use in production and why?
 
+The revocation problem is a situation where an administrator has left and is no longer a member of the company or department. However, they still have a valid token because it was cryptographically signed by cognito or by some other authentication service and there usually isn't any way to revoke the token on demand. The 30 minute lifetime in this lab defends against this problem because it limits the amount of time that the token remains active. 30 minutes is not a lot of time for an administrator to do damage because any authenticated session with an older token will not be able to stay authenticated for long.
+
+The flow that was used in this lab involves entering credentials into the application and manually handling MFA verification directly in the applications code. With this setup the application directly handles usernames and passwords which means securing them is the application owners responsibility. On the other hand, AN OAuth 2.0 flow with PKCE and a Cognito hosted UI will handle the majority of the login process instead of relying on the application itself. The credentials as well as the MFA and they would not be managed directly by the app but would instead be managed by the Cognito hosted UI. The application would instead rely on a generated code that is protected by PKCE which protects codes from being intercepted. In this setup the entire login flow is externally managed and secured by a third party so it is much less maintenance for the administrator.
+
+In a real production environment the OAuth 2.0 plus PKCE and Cognito hosted UI would be the preferred method because it is overall much more secure and it prevents the applicaiton from handling sensitive credentials directly. This protects against credentials being stolen as well as MFA from being exploited and is overall the recommended approach for a real system. Generally speaking most modern systems shouldn't really rely on manually handling the entire login flow because there are simply too many potential vulnerabilities and insecurities that are introduced with this.
+
 ### Q9. Plan, drift and immutable servers. Report how many resources terraform apply created (terraform state list) and what +, ~ and -/+ mean in a plan. Explain why changing one line of application code replaces the servers instead of updating them. After your hand edit in G7, how did Terraform find the change, and why would a rule that someone ADDS by hand not show in this plan?
 
-### Q10 (explore). Prove it, then reflect. Record what you saw in H2: the three requests to the dashboard service (no client certificate, certificate but no token, certificate and token but no JWT) and which layer produced each result, and the IAM, S3 and metadata results from the web server. Then explain what IMDSv2 with a hop limit of 1 protects against, and what Session Manager records that SSH does not.
+After making the change manually terraform reported that it would need to make one change. After running the plan terraform added 0 new resources, changed 1 resource, and destroyed 0 resources. The + symbol means that terraform is going to create a resource, while the - symbol means that it is going to destroy it. The ~ symbol means that terraform is able to edit/update the resource without destroying it and creating it again. Terraform can also indicate -/+ or +/-. In these cases Terraform will destroy and then create a replacement for a resource, or create a replacement and then destroy the old resource. Terraform found the change because it was able to query the state of the AWS resources using the installed provider for AWS. It then compared it to the current plan and found that there was a mismatch. It was then able to fix the mismatch. A rule that someone adds by hand may not show up in the plan because terraform has no way of knowing about it's existence. Terraform can get information from the state file, it's configuration files, and also by querying resources. Something that was added by hand may not show up in any of these three places, so terraform wouldn't be able to detect it.
+
+#### Terraform Output
+
+```shell
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the following symbols:
+  ~ update in-place
+
+Terraform will perform the following actions:
+
+  # aws_vpc_security_group_ingress_rule.web_console will be updated in-place
+  ~ resource "aws_vpc_security_group_ingress_rule" "web_console" {
+      ~ cidr_ipv4              = "0.0.0.0/0" -> "MyIp/32"
+      + description            = "Admin browser to the console (HTTPS, your address only)"
+        id                     = "sgr-0332c90ae3a314fa3"
+        # (7 unchanged attributes hidden)
+    }
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+
+Do you want to perform these actions?
+  Terraform will perform the actions described above.
+  Only 'yes' will be accepted to approve.
+
+  Enter a value: yes
+
+aws_vpc_security_group_ingress_rule.web_console: Modifying... [id=sgr-0332c90ae3a314fa3]
+aws_vpc_security_group_ingress_rule.web_console: Modifications complete after 0s [id=sgr-0332c90ae3a314fa3]
+
+Apply complete! Resources: 0 added, 1 changed, 0 destroyed.
+
+Outputs:
+
+admin_password = <sensitive>
+admin_username = "admin"
+alert_topic_arn = "arn:aws:sns:us-east-1:337820988322:lab02-security-alerts"
+cognito_client_id = "1fbfk2lnb8g9i93aajrrn7341p"
+cognito_user_pool_id = "us-east-2_ULaFpeD1M"
+console_fingerprint_command = "aws ec2 get-console-output --instance-id i-0dde6133d5db5ba92 --latest --output text --region us-east-2 | grep 'BROWSER CERT'"
+console_url = "https://3.12.155.193:8443"
+data_bucket = "lab02-nimbus-337820988322"
+free_tier_hours = 8
+instance_ids = {
+  "dashboard" = "i-02ef04dc77789e8eb"
+  "nat" = "i-0fdf1bb258be4e361"
+  "offboarding" = "i-070f72a8837d07cf1"
+  "onboarding" = "i-00147e60df12c7b36"
+  "web" = "i-0dde6133d5db5ba92"
+}
+
+```
+
+### Q10 (explore). Prove it, then reflect. Record what you saw in H2: the three requests to the dashboard service (no client certificate, certificate but no token, certificate and token but no JWT) and which layer produced each result, and the IAM, S3 and metadata results from the web server. Then explain what IMDSv2 with a hop limit of 1 protects against, and what Session Manager records that SSH does not?
+
+After running the tests in H2 I got the following results: The first check (no client certificate) returned a 000 code. This suggests that the request was blocked at the network/TLS level. The second test (certificate, no token) returned an http 401 code which means the request was unauthorized. This occured at the applications authentication layer. The third test (certificate and token no JWT) also returned an http 401 code like the previous test. Both requests in the fourth check returned an "AccessDenied". This suggests that the request was stopped at the API level/layer. The last check also returned a 401 due to not having a token. This was also stopped at the applications authentication layer.
+
+IMDSv2 with a hop limit of 1 protects against server side request forgery. This is because it prevents an attacker from getting a token if the request was made outside of a network or a container. Session manager records more information than SSH does. For example, ssh might be able to log commands that were run on a server, but these commands would be logged on the server itself and an administrator would have to implement their own auditing and aggregation scripts to collect them. SSH on it's own is also completely incapable of recording anything that happens at the API level. For example, ssh can record that someone signed in to a server with admin credentials but it cannot determine the IAM user who logged in. AWS Session Manager is able to record not only a full session transcript but also exact timestamps as well as which IAM user initiated the connection. With Session Manager everything can be logged in Cloudtrail, Cloudwatch, and S3 easily. With SSH alone this isn't possible.
