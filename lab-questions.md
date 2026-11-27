@@ -46,3 +46,54 @@ AWS Secrets manager in comparison has built in support for rotation, In terms of
 Hashicorp Vault costs absolutely nothing as it is open source, though it needs to be managed and configured by the user because it is not an AWS service. Vault also has native support for rotating secrets, though it is also the users responsibility to manage it because it is self hosted/deployed. Auditing also has to be handled by the user. Vault does not directly support Cloudtrail so the user/administrator has to use vaults built in auditing or implement another method to audit it. In terms of access controls Hashicorp Vault has it's own accounts and ACL policies, though it can be integrated with IAM.
 
 Secrets that are generated through Terraform are exposed through the state file because Terraform needs to generate and store those secrets somewhere so that it can accurately compare states. It can't really hide the secrets because they need to be readable so that Terraform can perform its job. A few ways to avoid this are to make use of a secrets manager like Vault. With this configuration Terraform will not store secrets and it will instead query them from the secrets manager. Another way of avoiding exposing secrets through the state file is to use ephemeral values and write-only arguments. This will prevent Terraform from storing the secrets and it will instead send the secrets to the relevant API without keeping a local copy.
+
+### Q7. Anatomy of a JWT. Using the token you decoded in H3, name the three parts of a JWT, say which of them is encrypted, and list the checks verify_jwt makes. For two of those checks, describe the attack or mistake it prevents?
+
+The three parts of a JWT are the header, the payload, and the signature. The header contains information about the encoding and the algorithm that was used. The payload contains claims and statements about a user. For example the token that I decoded had a 'cognito:groups' key an 'iss' key, and a 'client_id' key. The signature contains the hash of the payload as well as cognitos cryptographic signature. Nothing in the JWT token is actually encrypted, but the signature was generated and signed cryptographically so the token cannot be forged even if it is read by an unauthorized third party.
+
+#### verify_jwt function
+
+```python
+
+def verify_jwt(token, required_group=ADMIN_GROUP):
+    """Return the claims of a valid ACCESS token or raise AuthError."""
+    if not enabled():
+        raise AuthError("cognito is not configured")
+    if not token or token.count(".") != 2:
+        raise AuthError("malformed token")
+    try:
+        key = _jwks_client().get_signing_key_from_jwt(token).key
+        claims = jwt.decode(
+            token, key, algorithms=["RS256"],               # a fixed list: "alg: none" and HS256 tricks are refused
+            issuer=issuer(),                                # must come from OUR pool
+            options={"require": ["exp", "iat", "iss", "sub"]})
+    except (jwt.PyJWTError, BotoCoreError, OSError) as e:
+        raise AuthError(f"token rejected: {e.__class__.__name__}")
+    if claims.get("token_use") != "access":                 # an ID token must not be accepted as an access token
+        raise AuthError("not an access token")
+    if claims.get("client_id") != client_id():              # must have been issued to OUR app client
+        raise AuthError("wrong app client")
+    if required_group and required_group not in claims.get("cognito:groups", []):
+        raise AuthError("not in the required group")
+    return claims
+
+```
+
+The verify_jwt function makes the following checks:
+
+- A check to see if the cognito is configured
+- A JWT Structure and format check
+- A key and cryptographic check
+- An Issuer and claims check
+- A network error check
+- A token type check
+- An App client check
+- A group check
+
+These checks are important from a security standpoint because they protect against forgery and privelage escalation. For example, the key and cryptographic check protects against forgery by retrieving cognitos public key and enforcing a specific algorithm. Without this check the attacker can execute a forgery attack by switching the algorithm that is used and/or signing the token themselves using a public key string. The group check prevents standard non admin users from accessing privelaged resources by making sure that the token matches a specific group. Without this check a regular user that is authenticated can simply use their own token because it would be considered valid.
+
+### Q8 (explore). The limits of a bearer token. A JWT stays valid until it expires, even if the admin has left. Explain the revocation problem and how the 30 minute lifetime reduces it. Compare the USER_PASSWORD_AUTH flow used here with the OAuth 2.0 authorization code flow with PKCE and the Cognito hosted UI, and say which you would use in production and why?
+
+### Q9. Plan, drift and immutable servers. Report how many resources terraform apply created (terraform state list) and what +, ~ and -/+ mean in a plan. Explain why changing one line of application code replaces the servers instead of updating them. After your hand edit in G7, how did Terraform find the change, and why would a rule that someone ADDS by hand not show in this plan?
+
+### Q10 (explore). Prove it, then reflect. Record what you saw in H2: the three requests to the dashboard service (no client certificate, certificate but no token, certificate and token but no JWT) and which layer produced each result, and the IAM, S3 and metadata results from the web server. Then explain what IMDSv2 with a hop limit of 1 protects against, and what Session Manager records that SSH does not.
