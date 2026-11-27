@@ -160,3 +160,19 @@ instance_ids = {
 After running the tests in H2 I got the following results: The first check (no client certificate) returned a 000 code. This suggests that the request was blocked at the network/TLS level. The second test (certificate, no token) returned an http 401 code which means the request was unauthorized. This occured at the applications authentication layer. The third test (certificate and token no JWT) also returned an http 401 code like the previous test. Both requests in the fourth check returned an "AccessDenied". This suggests that the request was stopped at the API level/layer. The last check also returned a 401 due to not having a token. This was also stopped at the applications authentication layer.
 
 IMDSv2 with a hop limit of 1 protects against server side request forgery. This is because it prevents an attacker from getting a token if the request was made outside of a network or a container. Session manager records more information than SSH does. For example, ssh might be able to log commands that were run on a server, but these commands would be logged on the server itself and an administrator would have to implement their own auditing and aggregation scripts to collect them. SSH on it's own is also completely incapable of recording anything that happens at the API level. For example, ssh can record that someone signed in to a server with admin credentials but it cannot determine the IAM user who logged in. AWS Session Manager is able to record not only a full session transcript but also exact timestamps as well as which IAM user initiated the connection. With Session Manager everything can be logged in Cloudtrail, Cloudwatch, and S3 easily. With SSH alone this isn't possible.
+
+## Sources
+
+<https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html>
+
+<https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html>
+
+<https://developer.hashicorp.com/vault/docs>
+
+<https://oauth.net/2/>
+
+<https://guptadeepak.com/ciam-compass/guides/token-lifetime-best-practices/>
+
+<https://dev.to/afiqiqmal/aws-session-manager-vs-ssh-n3f>
+
+<https://nhimg.org/faq/why-should-the-ec2-instance-metadata-response-hop-limit-be-set-to-1/>
