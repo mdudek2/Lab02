@@ -3,10 +3,10 @@
 WHY THIS EXISTS. Lab01 kept one admin password in a secret and compared it by hand. Here the web console in the
 PUBLIC subnet no longer knows any password at all:
 
-  1. The admin signs in to a Cognito user pool (password plus an authenticator app code, MFA is mandatory).
-  2. Cognito answers with signed tokens. The ACCESS token is a JWT: three base64 parts (header.payload.signature),
+1. The admin signs in to a Cognito user pool (password plus an authenticator app code, MFA is mandatory).
+2. Cognito answers with signed tokens. The ACCESS token is a JWT: three base64 parts (header.payload.signature),
      signed with Cognito's private key. Anyone can check the signature with the pool's PUBLIC keys (the JWKS).
-  3. The web service sends the JWT to the private services. Each one verifies it on its own: signature,
+3. The web service sends the JWT to the private services. Each one verifies it on its own: signature,
      issuer, expiry, token type, app client and group membership. A stolen password alone is useless without the
      MFA code, and a forged or expired token is refused by every service, not only by the front door.
 
@@ -21,7 +21,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 ADMIN_GROUP = "admins"
 _lock = threading.Lock()
+_idp_client = None
 _jwks = None
+_jwks_issuer = None
 
 
 class AuthError(Exception):
@@ -51,10 +53,12 @@ def issuer():
 
 # ---------- verifying a token ----------
 def _jwks_client():
-    global _jwks
+    global _jwks, _jwks_issuer
+    current_issuer = issuer()
     with _lock:
-        if _jwks is None:
-            _jwks = jwt.PyJWKClient(issuer() + "/.well-known/jwks.json", cache_keys=True, lifespan=3600, timeout=5)
+        if _jwks is None or _jwks_issuer != current_issuer:
+            _jwks = jwt.PyJWKClient(current_issuer + "/.well-known/jwks.json", cache_keys=True, lifespan=3600, timeout=5)
+            _jwks_issuer = current_issuer
         return _jwks
 
 
@@ -76,15 +80,23 @@ def verify_jwt(token, required_group=ADMIN_GROUP):
         raise AuthError("not an access token")
     if claims.get("client_id") != client_id():              # must have been issued to OUR app client
         raise AuthError("wrong app client")
-    if required_group and required_group not in claims.get("cognito:groups", []):
+    groups = claims.get("cognito:groups") or []
+    if required_group and required_group not in groups:
         raise AuthError("not in the required group")
     return claims
 
 
 # ---------- signing in ----------
 def _idp():
-    return boto3.client("cognito-idp", region_name=region(),
-                        config=Config(signature_version=UNSIGNED, retries={"max_attempts": 3}))
+    global _idp_client
+    with _lock:
+        if _idp_client is None:
+            _idp_client = boto3.client(
+                "cognito-idp",
+                region_name=region(),
+                config=Config(signature_version=UNSIGNED, retries={"max_attempts": 3}),
+            )
+        return _idp_client
 
 
 def _result(resp, username):
@@ -128,8 +140,20 @@ def finish_setup(pending, code):
         if v.get("Status") != "SUCCESS":
             raise AuthError("code not accepted")
         resp = _idp().respond_to_auth_challenge(
-            ClientId=client_id(), ChallengeName="MFA_SETUP", Session=v["Session"],
-            ChallengeResponses={"USERNAME": pending["username"]})
-        return _result(resp, pending["username"])
+            ClientId=client_id(),
+            ChallengeName="MFA_SETUP",
+            Session=v.get("Session") or pending["session"],
+            ChallengeResponses={"USERNAME": pending["username"]},
+        )
+        result = _result(resp, pending["username"])
+        if result["state"] == "tokens":
+            _idp().set_user_mfa_preference(
+                AccessToken=result["access_token"],
+                SoftwareTokenMfaSettings={
+                    "Enabled": True,
+                    "PreferredMfa": True,
+                },
+            )
+        return result
     except ClientError as e:
         raise AuthError(e.response["Error"]["Code"])
