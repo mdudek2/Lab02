@@ -50,7 +50,7 @@ variable "instance_type" {
 variable "auto_shutdown_hours" {
   description = "Every server terminates itself after this many hours, in case you forget terraform destroy."
   type        = number
-  default     = 5
+  default     = 8
 
   validation {
     condition     = var.auto_shutdown_hours >= 1 && var.auto_shutdown_hours <= 12
